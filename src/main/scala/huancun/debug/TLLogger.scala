@@ -8,6 +8,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleMap
 import huancun.utils.GTimer
+import utility.ChiselDB
 
 trait HasCLikeTypes {
   // c++ firendly data types

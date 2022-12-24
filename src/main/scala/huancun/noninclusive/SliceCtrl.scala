@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import huancun._
-import huancun.utils.RegNextN
+import utility.RegNextN
 
 class SliceCtrl()(implicit p: Parameters) extends HuanCunModule {
 
