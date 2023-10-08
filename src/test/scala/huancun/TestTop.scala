@@ -2,8 +2,9 @@ package huancun
 
 import chisel3._
 import chisel3.util._
-import huancun.utils.TLClientsMerger
-import chipsalliance.rocketchip.config._
+import utility.{TLClientsMerger, ChiselDB, FileRegisters, TLLogger}
+import huancun.debug._
+import org.chipsalliance.cde.config._
 import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 import freechips.rocketchip.util._
 import freechips.rocketchip.diplomacy._
@@ -143,8 +144,31 @@ class TestTop_L2L3()(implicit p: Parameters) extends LazyModule {
       TLDelayer(delayFactor) :=*
       l3.node :=* xbar
 
-  lazy val module = new LazyModuleImp(this){
-    master_nodes.zipWithIndex.foreach{
+  for(tllogger <- l2_l3_tllog_nodes) {
+    xbar :=* tllogger
+  }
+
+  for (i <- 0 until 2) {
+    l2_l3_tllog_nodes(i) :=
+      TLBuffer() :=
+      l2_nodes(i) :=
+      l1d_l2_tllog_nodes(i) :=
+      TLBuffer() :=
+      l1d_nodes(i)
+  }
+
+  lazy val module = new LazyModuleImp(this) {
+    val timer = WireDefault(0.U(64.W))
+    val logEnable = WireDefault(false.B)
+    val clean = WireDefault(false.B)
+    val dump = WireDefault(false.B)
+
+    dontTouch(timer)
+    dontTouch(logEnable)
+    dontTouch(clean)
+    dontTouch(dump)
+
+    master_nodes.zipWithIndex.foreach {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
@@ -316,7 +340,7 @@ object TestTop_L2L3 extends App {
     )
   })
   val top = DisableMonitors(p => LazyModule(new TestTop_L2L3()(p)) )(config)
-   
+
 
   (new ChiselStage).execute(args, Seq(
     ChiselGeneratorAnnotation(() => top.module)
