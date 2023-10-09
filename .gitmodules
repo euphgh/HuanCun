@@ -5,3 +5,4 @@
 [submodule "Utility"]
 	path = Utility
 	url = https://github.com/OpenXiangShan/Utility
+	branch = 627ced7
