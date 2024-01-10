@@ -9,7 +9,7 @@ import freechips.rocketchip.tilelink.TLHints._
 import huancun._
 import huancun.utils._
 import huancun.MetaData._
-import utility.ParallelMax
+import utility.{MemReqSource, ParallelMax}
 
 class C_Status(implicit p: Parameters) extends HuanCunBundle {
   // When C nest A, A needs to know the status of C and tells C to release through to next level
@@ -87,7 +87,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   val gotDirty = RegInit(false.B)
   val a_do_release = RegInit(false.B)
   val a_do_probe = RegInit(false.B)
-  val meta_no_clients = Cat(self_meta.clientStates.map(_ === INVALID)).andR()
+  val meta_no_clients = Cat(self_meta.clientStates.map(_ === INVALID)).andR
   val req_promoteT = req_acquire && Mux(
     self_meta.hit,
     meta_no_clients && self_meta.state === TIP,
@@ -693,7 +693,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
           )
         }
       }
-      when(Cat(clients_meta.map(_.hit)).orR()) {
+      when(Cat(clients_meta.map(_.hit)).orR) {
         s_probe := false.B
         s_wbclientsdir := false.B
         w_probeackfirst := false.B
@@ -703,7 +703,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     }
   }
 
-  val bypassPut = req_put && !self_meta.hit && !Cat(clients_meta.map(_.hit)).orR()
+  val bypassPut = req_put && !self_meta.hit && !Cat(clients_meta.map(_.hit)).orR
   val bypassPut_latch = Keep(bypassPut)
   val bypassPut_all = Mux(io.dirResult.valid, bypassPut, bypassPut_latch)
   // Cache alias will always preferCache to avoid trifle
@@ -836,7 +836,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   }
 
   val self_ecc_err = meta_reg.self.hit && meta_reg.self.error
-  val client_ecc_err = Cat(meta_reg.clients.states.map(_.hit)).orR() && meta_reg.clients.error
+  val client_ecc_err = Cat(meta_reg.clients.states.map(_.hit)).orR && meta_reg.clients.error
   io.ecc.valid := meta_valid && (self_ecc_err || client_ecc_err)
   io.ecc.bits.addr := Cat(req.tag, req.set, req.off)
   io.ecc.bits.errCode := Mux(self_ecc_err, EccInfo.ERR_SELF_DIR, EccInfo.ERR_CLIENT_DIR)
@@ -927,7 +927,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
 
   val no_wait = w_probeacklast && w_grantlast && w_releaseack && w_grantack && w_putwritten && w_sinkcack
 
-  val clients_meta_busy = Cat(clients_meta.map(s => !s.hit && s.state =/= INVALID)).orR()
+  val clients_meta_busy = Cat(clients_meta.map(s => !s.hit && s.state =/= INVALID)).orR
   val client_dir_conflict = RegEnable(
     req.fromA && req_acquire && clients_meta_busy,
     io.dirResult.valid
@@ -993,7 +993,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   val acquire_opcode = if (cacheParams.name == "L2") {
     Mux(req.opcode === AcquirePerm && req.param === BtoT, AcquirePerm, Mux(req.opcode === Hint, AcquireBlock, req.opcode))
   } else {
-    Mux(req_put, AcquireBlock, req.opcode)
+    Mux(req_put, AcquireBlock, Mux(req.opcode === Hint, AcquireBlock, req.opcode))
     // for put & !bypassPut, cache hierachy should have B/T. AcquirePerm is enough
   }
 
@@ -1003,7 +1003,10 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
       req.param
     )
   } else {
-    Mux(req.opcode === AcquireBlock && req.param === BtoT, NtoT, Mux(req_put, NtoT, req.param))
+    Mux(req.opcode === Hint,
+      Mux(req_needT, Mux(highest_perm_reg === BRANCH, BtoT, NtoT), NtoB),
+      Mux(req.opcode === AcquireBlock && req.param === BtoT, NtoT, Mux(req_put, NtoT, req.param))
+    )
   }
 
   oa.opcode := Mux(!s_transferput || bypassGet, req.opcode,
@@ -1039,6 +1042,10 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   oa.putData := bypassPut_latch
   oa.bufIdx := req.bufIdx
   oa.size := req.size
+  oa.reqSource := Mux(req.opcode === Hint,
+    if (cacheParams.level == 2) req.reqSource else MemReqSource.Prefetch2L3Unknown.id.U,
+    req.reqSource
+  )
 
   ob.tag := req.tag
   ob.set := req.set
@@ -1167,6 +1174,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     ),
     false.B
   )
+  od.isHit := self_meta.hit
   od.bufIdx := req.bufIdx
   od.bypassPut := bypassPut_latch
 
@@ -1246,37 +1254,37 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   }
 
   dontTouch(io.tasks)
-  when(io.tasks.source_a.fire()) {
+  when(io.tasks.source_a.fire) {
     s_acquire := true.B
     s_transferput := true.B
   }
-  when(io.tasks.source_b.fire()) {
+  when(io.tasks.source_b.fire) {
     s_probe := true.B
     assert(io.tasks.source_b.bits.clients =/= 0.U, "Invalid probe task\n")
   }
-  when(io.tasks.source_c.fire()) {
+  when(io.tasks.source_c.fire) {
     s_release := true.B
     s_probeack := true.B
   }
-  when(io.tasks.source_d.fire()) {
+  when(io.tasks.source_d.fire) {
     s_execute := true.B
   }
-  when(io.tasks.source_e.fire()) {
+  when(io.tasks.source_e.fire) {
     s_grantack := true.B
   }
-  when(io.tasks.dir_write.fire()) {
+  when(io.tasks.dir_write.fire) {
     s_wbselfdir := true.B
   }
-  when(io.tasks.tag_write.fire()) {
+  when(io.tasks.tag_write.fire) {
     s_wbselftag := true.B
   }
-  when(io.tasks.client_dir_write.fire()){
+  when(io.tasks.client_dir_write.fire){
     s_wbclientsdir := true.B
   }
-  when(io.tasks.client_tag_write.fire()){
+  when(io.tasks.client_tag_write.fire){
     s_wbclientstag := true.B
   }
-  when(io.tasks.sink_c.fire()) {
+  when(io.tasks.sink_c.fire) {
     when(!s_writeprobe) {
       s_writeprobe := true.B
     }.otherwise {
@@ -1284,10 +1292,10 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     }
   }
   if (prefetchOpt.nonEmpty) {
-    when(io.tasks.prefetch_train.get.fire()) {
+    when(io.tasks.prefetch_train.get.fire) {
       s_triggerprefetch.get := true.B
     }
-    when(io.tasks.prefetch_resp.get.fire()) {
+    when(io.tasks.prefetch_resp.get.fire) {
       s_prefetchack.get := true.B
     }
   }
@@ -1295,7 +1303,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
   val sink_c_resp_valid = io.resps.sink_c.valid && !w_probeacklast
   val probeack_bit = getClientBitOH(io.resps.sink_c.bits.source)
   // ! This is the last client sending probeack
-  val probeack_last = (probes_done | probeack_bit) === probe_clients
+  val probeack_last = if(clientBits == 1) sink_c_resp_valid else (probes_done | probeack_bit) === probe_clients
 
   // Update client_probeack_param_vec according to the param of ProbeAck
   client_probeack_param_vec := client_probeack_param_vec_reg
@@ -1431,7 +1439,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
       }.elsewhen(will_be_free){
         reg := 0.U
       }
-      (x.asUInt() | reg.asUInt()).asTypeOf(x)
+      (x.asUInt | reg.asUInt).asTypeOf(x)
     }
   }
 
@@ -1442,7 +1450,7 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     }.elsewhen(will_be_free){
       reg := 0.U
     }
-    reg.asUInt().asTypeOf(x)
+    reg.asUInt.asTypeOf(x)
   }
 
   io.status.bits.will_free := will_be_free
@@ -1465,15 +1473,18 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
 
   // Status
   io.status.valid := req_valid
+  io.status.bits.channel := req.channel
   io.status.bits.set := req.set
   io.status.bits.tag := req.tag
-  io.status.bits.reload := false.B // TODO
+  io.status.bits.is_miss := !self_meta.hit
   io.status.bits.way := self_meta.way
   io.status.bits.way_reg := meta_reg.self.way  // used to ease timing issue
   io.status.bits.will_grant_data := req.fromA && od.opcode(0) && io.tasks.source_d.bits.useBypass
   io.status.bits.will_save_data := req.fromA && (preferCache_latch || self_meta.hit) && !acquirePermMiss
   io.status.bits.is_prefetch := req.isPrefetch.getOrElse(false.B)
   io.status.bits.blockB := true.B
+  io.status.bits.reqSource := req.reqSource
+
   // B nest A
   // if we are waitting for probeack,
   // we should not let B req in (avoid multi-probe to client)
@@ -1517,4 +1528,6 @@ class MSHR()(implicit p: Parameters) extends BaseMSHR[DirResult, SelfDirWrite, S
     io_b_status.way === self_meta.way &&
     io_b_status.nestedProbeAckData &&
     req.fromA && (preferCache_latch || self_meta.hit) && !acquirePermMiss
+
+  val read_miss = !self_meta.hit || self_meta.state === INVALID
 }

@@ -24,7 +24,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.leftOR
-import huancun.noninclusive.{MSHR, ProbeHelper, SliceCtrl}
+import huancun.noninclusive.{MSHR, ProbeHelper, SliceCtrl, DirResult}
 import huancun.prefetch._
 import utility._
 
@@ -33,6 +33,8 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
     val in = Flipped(TLBundle(edgeIn.bundle))
     val out = TLBundle(edgeOut.bundle)
     val prefetch = prefetchOpt.map(_ => Flipped(new PrefetchIO))
+    val ms_status = topDownOpt.map(_ => Vec(mshrsAll, ValidIO(new MSHRStatus)))
+    val dir_result = topDownOpt.map(_ => ValidIO(new DirResult))
     val ctl_req = Flipped(DecoupledIO(new CtrlReq()))
     val ctl_resp = DecoupledIO(new CtrlResp())
     val ctl_ecc = DecoupledIO(new EccInfo())
@@ -112,7 +114,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
   dataStorage.io.sourceD_wdata <> sourceD.io.bs_wdata
   dataStorage.io.sourceC_raddr <> ctrl_arb(sourceC.io.bs_raddr, ctrl.map(_.io.bs_r_addr))
   dataStorage.io.sinkC_waddr <> ctrl_arb(sinkC.io.bs_waddr, ctrl.map(_.io.bs_w_addr))
-  dataStorage.io.sinkC_wdata <> (if(ctrl.nonEmpty){
+  dataStorage.io.sinkC_wdata := (if(ctrl.nonEmpty){
     Mux(ctrl.get.io.bs_w_addr.valid,
       ctrl.get.io.bs_w_data,
       sinkC.io.bs_wdata
@@ -167,7 +169,6 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
       mshr.io.alloc := mshrAlloc.io.alloc(i)
       mshrAlloc.io.status(i) := mshr.io.status
   }
-
   val c_mshr = ms.last
   val bc_mshr = ms.init.last
   val abc_mshr = ms.init.init
@@ -348,7 +349,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
       mshr.io_releaseThrough := false.B
       mshr.io_probeAckDataThrough := Cat(
         abc_mshr.map(non_inclusive).map(_.io_b_status.probeAckDataThrough)
-      ).orR()
+      ).orR
     case _ => // skip
   }
 
@@ -365,7 +366,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
       mshr.io_probeAckDataThrough := false.B
       mshr.io_releaseThrough := Cat(
         (abc_mshr :+ bc_mshr).map(non_inclusive).map(_.io_c_status.releaseThrough)
-      ).orR()
+      ).orR
     case _: inclusive.MSHR =>
   }
 
@@ -634,10 +635,22 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
     mshrReq.bits.fromCmoHelper := false.B
     mshrReq.bits.bufIdx := DontCare
     mshrReq.bits.dirty := false.B
+    mshrReq.bits.isHit := true.B
     mshrReq.bits.needProbeAckData.foreach(_ := false.B)
+    mshrReq.bits.reqSource := pftReq.bits.pfSource
     pftReq.ready := mshrReq.ready
     mshrReq
   }
+
+  topDownOpt.foreach (
+    _ => {
+      io.ms_status.get.zip(ms).foreach {
+        case (out, mshr) =>
+          out := mshr.io.status
+      }
+      io.dir_result.get := directory.io.result
+    }
+  )
 
   val perfinfo = IO(Output(Vec(numPCntHc, (UInt(6.W)))))
   perfinfo := DontCare

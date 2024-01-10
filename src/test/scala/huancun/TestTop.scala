@@ -12,6 +12,13 @@ import freechips.rocketchip.tilelink._
 
 import scala.collection.mutable.ArrayBuffer
 
+// XiangShan log / perf ctrl, should be inited in SimTop IO
+// If not needed, just ingore these signals
+class PerfInfoIO extends Bundle {
+  val clean = Input(Bool())
+  val dump = Input(Bool())
+}
+
 class TestTop_L2()(implicit p: Parameters) extends LazyModule {
 
   /* L1D   L1D
@@ -19,6 +26,7 @@ class TestTop_L2()(implicit p: Parameters) extends LazyModule {
    *    L2
    */
 
+  override lazy val desiredName: String = "TestTop"
   val delayFactor = 0.5
   val cacheParams = p(HCCacheParamsKey)
 
@@ -43,14 +51,15 @@ class TestTop_L2()(implicit p: Parameters) extends LazyModule {
   }
 
   val l1d_nodes = (0 until 2) map( i => createClientNode(s"l1d$i", 32))
+  val l1d_l2_tllog_nodes = (0 until 2) map(i => TLLogger(s"L1D_L2_$i"))
   val master_nodes = l1d_nodes
 
   val l2 = LazyModule(new HuanCun())
   val xbar = TLXbar()
   val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffL), beatBytes = 32))
 
-  for(l1d <- l1d_nodes){
-    xbar := TLBuffer() := l1d
+  for(i <- 0 until 2) {
+    xbar :=* l1d_l2_tllog_nodes(i) := TLBuffer() := l1d_nodes(i)
   }
 
   ram.node :=
@@ -60,11 +69,114 @@ class TestTop_L2()(implicit p: Parameters) extends LazyModule {
       TLDelayer(delayFactor) :=*
       l2.node :=* xbar
 
-  lazy val module = new LazyModuleImp(this){
-    master_nodes.zipWithIndex.foreach{
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle(){
+      val perfInfo = new PerfInfoIO
+    })
+    val timer = WireDefault(0.U(64.W))
+    val logEnable = WireDefault(false.B)
+    val clean = WireDefault(io.perfInfo.clean)
+    val dump = WireDefault(io.perfInfo.dump)
+
+    dontTouch(timer)
+    dontTouch(logEnable)
+    dontTouch(clean)
+    dontTouch(dump)
+
+    master_nodes.zipWithIndex.foreach {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
     }
+  }
+}
+
+class TestTop_L2_Standalone()(implicit p: Parameters) extends LazyModule {
+
+  /* L1D   L1D
+   *  \    /
+   *    L2
+   */
+
+  override lazy val desiredName: String = "TestTop"
+  val delayFactor = 0.5
+  val cacheParams = p(HCCacheParamsKey)
+
+  def createClientNode(name: String, sources: Int) = {
+    val masterNode = TLClientNode(Seq(
+      TLMasterPortParameters.v2(
+        masters = Seq(
+          TLMasterParameters.v1(
+            name = name,
+            sourceId = IdRange(0, sources),
+            supportsProbe = TransferSizes(cacheParams.blockBytes)
+          )
+        ),
+        channelBytes = TLChannelBeatBytes(cacheParams.blockBytes),
+        minLatency = 1,
+        echoFields = cacheParams.echoField,
+        requestFields = Seq(PrefetchField(), PreferCacheField(), DirtyField(), AliasField(2)),
+        responseKeys = cacheParams.respKey
+      )
+    ))
+    masterNode
+  }
+
+  def createManagerNode(name: String, sources: Int) = {
+    val xfer = TransferSizes(cacheParams.blockBytes, cacheParams.blockBytes)
+    val slaveNode = TLManagerNode(Seq(
+      TLSlavePortParameters.v1(Seq(
+        TLSlaveParameters.v1(
+          address          = Seq(AddressSet(0, 0xffffL)),
+          regionType       = RegionType.CACHED,
+          executable       = true,
+          supportsAcquireT = xfer,
+          supportsAcquireB = xfer,
+          fifoId           = None
+        )),
+        beatBytes = 32,
+        minLatency = 2,
+        responseFields = cacheParams.respField,
+        requestKeys = cacheParams.reqKey,
+        endSinkId = sources
+      ))
+    )
+    slaveNode
+  }
+
+  val l1d_nodes = (0 until 2) map( i => createClientNode(s"l1d$i", 32))
+  val l1d_l2_tllog_nodes = (0 until 2) map(i => TLLogger(s"L1D_L2_$i"))
+  val master_nodes = l1d_nodes
+
+  val l2 = LazyModule(new HuanCun())
+  val xbar = TLXbar()
+  val l3 = createManagerNode("Fake_L3", 16)
+
+  for(i <- 0 until 2) {
+    xbar :=* l1d_l2_tllog_nodes(i) := TLBuffer() := l1d_nodes(i)
+  }
+
+  l3 :=
+    TLBuffer() :=
+    TLXbar() :=*
+    TLDelayer(delayFactor) :=*
+    l2.node :=* xbar
+
+  lazy val module = new LazyModuleImp(this) {
+    val timer = WireDefault(0.U(64.W))
+    val logEnable = WireDefault(false.B)
+    val clean = WireDefault(false.B)
+    val dump = WireDefault(false.B)
+
+    dontTouch(timer)
+    dontTouch(logEnable)
+    dontTouch(clean)
+    dontTouch(dump)
+
+    master_nodes.zipWithIndex.foreach {
+      case (node, i) =>
+        node.makeIOs()(ValName(s"master_port_$i"))
+    }
+    l3.makeIOs()(ValName(s"slave_port"))
   }
 }
 
@@ -77,6 +189,7 @@ class TestTop_L2L3()(implicit p: Parameters) extends LazyModule {
    *    L3
    */
 
+  override lazy val desiredName: String = "TestTop"
   val delayFactor = 0.2
   val cacheParams = p(HCCacheParamsKey)
 
@@ -94,13 +207,15 @@ class TestTop_L2L3()(implicit p: Parameters) extends LazyModule {
         minLatency = 1,
         echoFields = Seq(DirtyField()),
         requestFields = Seq(PrefetchField(), PreferCacheField(), DirtyField(), AliasField(2)),
-        responseKeys = cacheParams.respKey
+        responseKeys = Seq(IsHitKey)
       )
     ))
     masterNode
   }
 
   val l1d_nodes = (0 until 2) map( i => createClientNode(s"l1d$i", 32))
+  val l1d_l2_tllog_nodes = (0 until 2) map( i => TLLogger(s"L1D_L2_$i"))
+  val l2_l3_tllog_nodes = (0 until 2) map(i => TLLogger(s"L2_L3_$i"))
   val master_nodes = l1d_nodes
 
   val l2_nodes = (0 until 2) map( i => LazyModule(new HuanCun()(new Config((_, _, _) => {
@@ -111,7 +226,8 @@ class TestTop_L2L3()(implicit p: Parameters) extends LazyModule {
       clientCaches = Seq(CacheParameters(sets = 32, ways = 8, blockGranularity = 5, name = "L2")),
       prefetch = Some(huancun.prefetch.BOPParameters()),
       reqField = Seq(PreferCacheField()),
-      echoField = Seq(DirtyField())
+      echoField = Seq(DirtyField()),
+      respKey = Seq(IsHitKey)
     )
   }))).node)
 
@@ -122,20 +238,13 @@ class TestTop_L2L3()(implicit p: Parameters) extends LazyModule {
       inclusive = false,
       clientCaches = Seq(CacheParameters(sets = 32, ways = 8, blockGranularity = 5, name = "L3")),
       echoField = Seq(DirtyField()),
+      respField  = Seq(IsHitField()),
       simulation = true
     )
   })))
 
   val xbar = TLXbar()
   val ram = LazyModule(new TLRAM(AddressSet(0, 0xffffL), beatBytes = 32))
-
-  l1d_nodes.zip(l2_nodes).map {
-    case (l1d,l2) => l2 := TLBuffer() := l1d
-  }
-
-  for(l2 <- l2_nodes){
-    xbar := TLBuffer() := l2
-  }
 
   ram.node :=
     TLXbar() :=*
@@ -151,7 +260,7 @@ class TestTop_L2L3()(implicit p: Parameters) extends LazyModule {
   for (i <- 0 until 2) {
     l2_l3_tllog_nodes(i) :=
       TLBuffer() :=
-      l2_nodes(i) :=
+      l2_nodes(i) := 
       l1d_l2_tllog_nodes(i) :=
       TLBuffer() :=
       l1d_nodes(i)
@@ -176,6 +285,16 @@ class TestTop_L2L3()(implicit p: Parameters) extends LazyModule {
 }
 
 class TestTop_FullSys()(implicit p: Parameters) extends LazyModule {
+
+//      l1d   l1d
+//       |     |
+//       l2    l2     dma
+//       |     |       |
+//  ----- L3_banded_xbar -----
+//             |
+//             l3
+
+  override lazy val desiredName: String = "TestTop"
   val cacheParams: HCCacheParameters = p(HCCacheParamsKey)
   val nrL2 = 1
   val L2NBanks = 1
@@ -227,6 +346,7 @@ class TestTop_FullSys()(implicit p: Parameters) extends LazyModule {
       clientCaches = Seq(CacheParameters("dcache", sets = 32, ways = 8, blockGranularity = 5)),
       reqField = Seq(PreferCacheField()),
       echoField = Seq(DirtyField()),
+      respKey = Seq(IsHitKey),
       prefetch = Some(huancun.prefetch.BOPParameters()),
       sramDepthDiv = 2,
       simulation = true
@@ -251,7 +371,7 @@ class TestTop_FullSys()(implicit p: Parameters) extends LazyModule {
   val dma_node = createDMANode(s"dma", 16)
   val master_nodes = l1d_nodes ++ Seq(dma_node)
 
-  val ram = LazyModule(new TLRAM(AddressSet(0, 0xFFFFFL), beatBytes = 32))
+  val ram = LazyModule(new TLRAM(AddressSet(0, 0xFFFFL), beatBytes = 32))
   val l3_binder = BankBinder(L3NBanks, L3BlockSize)
   val mem_xbar = TLXbar()
   val l3_banked_xbar = TLXbar()
@@ -260,6 +380,8 @@ class TestTop_FullSys()(implicit p: Parameters) extends LazyModule {
   val core_to_l3_ports = Array.fill(nrL2) { TLTempNode() }
   val l2_binder = BankBinder(L2NBanks, 64)
   val l2_xbar = TLXbar()
+  val l1_l2_tllog_nodes = (0 until 2) map(i => TLLogger(s"L1_L2_$i"))
+  val l2_l3_tllog_nodes = (0 until 2) map(i => TLLogger(s"L2_L3_$i"))
 
   ram.node :=
     TLBuffer.chainNode(100) :=
@@ -297,17 +419,32 @@ class TestTop_FullSys()(implicit p: Parameters) extends LazyModule {
       TLBuffer.chainNode(2) :=
       TLClientsMerger() :=
       TLXbar() :=*
-      l2_binder :*=
+      l2_binder :*=*
+      l2_l3_tllog_nodes(i) :=
       l2_nodes(i)
   }
 
   require(nrL2 == 1)
   l2_nodes.head :=* l2_xbar
-  for (l1d <- l1d_nodes) {
-    l2_xbar := TLBuffer() := l1d
+  for (tllogger <- l1_l2_tllog_nodes) {
+    l2_xbar :=* tllogger
+  }
+
+  for (i <- 0 until 2) {
+    l1_l2_tllog_nodes(i) := TLBuffer() := l1d_nodes(i)
   }
 
   lazy val module = new LazyModuleImp(this) {
+    val timer = WireDefault(0.U(64.W))
+    val logEnable = WireDefault(false.B)
+    val clean = WireDefault(false.B)
+    val dump = WireDefault(false.B)
+
+    dontTouch(timer)
+    dontTouch(logEnable)
+    dontTouch(clean)
+    dontTouch(dump)
+
     master_nodes.zipWithIndex.foreach {
       case (node, i) =>
         node.makeIOs()(ValName(s"master_port_$i"))
@@ -329,6 +466,26 @@ object TestTop_L2 extends App {
   (new ChiselStage).execute(args, Seq(
     ChiselGeneratorAnnotation(() => top.module)
   ))
+  ChiselDB.addToFileRegisters
+  FileRegisters.write(fileDir = "./build")
+}
+
+object TestTop_L2_Standalone extends App {
+  val config = new Config((_, _, _) => {
+    case HCCacheParamsKey => HCCacheParameters(
+      inclusive = false,
+      clientCaches = Seq(CacheParameters(sets = 32, ways = 8, blockGranularity = 5, name = "L2", aliasBitsOpt = Some(2))),
+      echoField = Seq(DirtyField()),
+      sramClkDivBy2 = true,
+    )
+  })
+  val top = DisableMonitors(p => LazyModule(new TestTop_L2_Standalone()(p)) )(config)
+
+  (new ChiselStage).execute(args, Seq(
+    ChiselGeneratorAnnotation(() => top.module)
+  ))
+  ChiselDB.addToFileRegisters
+  FileRegisters.write(fileDir = "./build")
 }
 
 object TestTop_L2L3 extends App {
@@ -345,6 +502,8 @@ object TestTop_L2L3 extends App {
   (new ChiselStage).execute(args, Seq(
     ChiselGeneratorAnnotation(() => top.module)
   ))
+  ChiselDB.addToFileRegisters
+  FileRegisters.write(fileDir = "./build")
 }
 
 object TestTop_FullSys extends App {
@@ -360,4 +519,6 @@ object TestTop_FullSys extends App {
   (new ChiselStage).execute(args, Seq(
     ChiselGeneratorAnnotation(() => top.module)
   ))
+  ChiselDB.addToFileRegisters
+  FileRegisters.write(fileDir = "./build")
 }

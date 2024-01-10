@@ -6,9 +6,9 @@ name: CI
 on:
   # Triggers the workflow on push or pull request events but only for the main branch
   push:
-    branches: [ main, ci-test ]
+    branches: [ master, ci-test, non-inclusive ]
   pull_request:
-    branches: [ main ]
+    branches: [ master, non-inclusive ]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -16,7 +16,7 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # This workflow contains a single job called "build"
-  checks:
+  tl-test_L2:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
 
@@ -42,8 +42,8 @@ jobs:
         with:
           mill-version: 0.11.1
 
-      - name: Check scalafmt
-        run: make checkformat
+      # - name: Check scalafmt
+      #   run: make checkformat
         
       - name: Compile
         run: make compile

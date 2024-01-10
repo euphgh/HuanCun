@@ -23,6 +23,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.{BundleMap, UIntToOH1}
+import utility.MemReqSource
 
 abstract class InnerTask(implicit p: Parameters) extends HuanCunBundle {
   val sourceId = UInt(sourceIdBits.W)
@@ -67,6 +68,7 @@ class SourceDReq(implicit p: Parameters) extends InnerTask with HasChannelBits {
   val sinkId = UInt(mshrBits.W)
   val bypassPut = Bool()
   val dirty = Bool()
+  val isHit = Bool()
 }
 
 class SourceAReq(implicit p: Parameters) extends HuanCunBundle {
@@ -81,6 +83,7 @@ class SourceAReq(implicit p: Parameters) extends HuanCunBundle {
   val size = UInt(msgSizeBits.W)
   val needData = Bool()
   val putData = Bool()
+  val reqSource = UInt(MemReqSource.reqSourceBits.W)
 }
 class SourceCReq(implicit p: Parameters) extends HuanCunBundle {
   val opcode = UInt(3.W)
@@ -113,6 +116,7 @@ class SinkDResp(implicit p: Parameters) extends HuanCunBundle {
   val last = Bool() // last beat
   val denied = Bool()
   val dirty = Bool()
+  // val isHit = Bool()
   val bufIdx = UInt(bufIdxBits.W)
 }
 class SinkEResp(implicit p: Parameters) extends HuanCunBundle {
@@ -151,17 +155,19 @@ class MSHRRequest(implicit p: Parameters) extends HuanCunBundle with HasChannelB
   val alias = aliasBitsOpt.map(_ => UInt(aliasBitsOpt.get.W))
   val preferCache = Bool()
   val dirty = Bool()
+  val isHit = Bool()
   val fromProbeHelper = Bool()
   val fromCmoHelper = Bool()
   val needProbeAckData = if (cacheParams.inclusive) None else Some(Bool())
+  val reqSource = UInt(MemReqSource.reqSourceBits.W)
 }
 
-class MSHRStatus(implicit p: Parameters) extends HuanCunBundle {
+class MSHRStatus(implicit p: Parameters) extends HuanCunBundle with HasChannelBits {
   val set = UInt(setBits.W)
   val tag = UInt(tagBits.W)
   val way = UInt(wayBits.W)
   val way_reg = UInt(wayBits.W)
-  val reload = Bool()
+  val is_miss = Bool()
   val blockB, blockC = Bool()
   val nestB, nestC = Bool()
   /**
@@ -182,6 +188,7 @@ class MSHRStatus(implicit p: Parameters) extends HuanCunBundle {
   val will_free = Bool()
   // for debug usage now
   val is_prefetch = Bool()
+  val reqSource = UInt(MemReqSource.reqSourceBits.W)
 }
 
 class DSAddress(implicit p: Parameters) extends HuanCunBundle {
@@ -209,6 +216,7 @@ class SourceDHazard(implicit p: Parameters) extends HuanCunBundle {
 class ReplacerInfo() extends Bundle {
   val channel = UInt(3.W)
   val opcode = UInt(3.W)
+  val reqSource = UInt(MemReqSource.reqSourceBits.W)
 }
 
 class PutBufferPop(implicit p: Parameters) extends HuanCunBundle {

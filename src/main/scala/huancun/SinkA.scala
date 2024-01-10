@@ -23,6 +23,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
+import utility.MemReqSource
 
 class SinkA(implicit p: Parameters) extends HuanCunModule {
   val io = IO(new Bundle() {
@@ -49,13 +50,13 @@ class SinkA(implicit p: Parameters) extends HuanCunModule {
   val beatVals = RegInit(VecInit(Seq.fill(bufBlocks) {
     VecInit(Seq.fill(beats) { false.B })
   }))
-  val bufVals = VecInit(beatVals.map(_.asUInt().orR())).asUInt()
-  val full = bufVals.andR()
+  val bufVals = VecInit(beatVals.map(_.asUInt.orR)).asUInt
+  val full = bufVals.andR
   val noSpace = full && hasData
   val insertIdx = PriorityEncoder(~bufVals)
-  val insertIdxReg = RegEnable(insertIdx, a.fire() && first)
+  val insertIdxReg = RegEnable(insertIdx, a.fire && first)
 
-  when(a.fire() && hasData) {
+  when(a.fire && hasData) {
     when(first) {
       putBuffer(insertIdx)(count).data := a.bits.data
       putBuffer(insertIdx)(count).mask := a.bits.mask
@@ -108,19 +109,21 @@ class SinkA(implicit p: Parameters) extends HuanCunModule {
     allocInfo.preferCache := Mux((a.bits.opcode === TLMessages.Get || a.bits.opcode(2,1) === 0.U), true.B, a.bits.user.lift(PreferCacheKey).getOrElse(true.B))
   }
   allocInfo.dirty := false.B // ignored
+  allocInfo.isHit := true.B // ignored
   allocInfo.fromProbeHelper := false.B
   allocInfo.fromCmoHelper := false.B
   allocInfo.needProbeAckData.foreach(_ := false.B)
+  allocInfo.reqSource := a.bits.user.lift(utility.ReqSourceKey).getOrElse(MemReqSource.NoWhere.id.U)
 
   io.d_pb_pop.ready := beatVals(io.d_pb_pop.bits.bufIdx)(io.d_pb_pop.bits.count)
-  io.d_pb_beat := RegEnable(putBuffer(io.d_pb_pop.bits.bufIdx)(io.d_pb_pop.bits.count), io.d_pb_pop.fire())
-  when(io.d_pb_pop.fire() && io.d_pb_pop.bits.last) {
+  io.d_pb_beat := RegEnable(putBuffer(io.d_pb_pop.bits.bufIdx)(io.d_pb_pop.bits.count), io.d_pb_pop.fire)
+  when(io.d_pb_pop.fire && io.d_pb_pop.bits.last) {
     beatVals(io.d_pb_pop.bits.bufIdx).foreach(_ := false.B)
   }
 
   io.a_pb_pop.ready := beatVals(io.a_pb_pop.bits.bufIdx)(io.a_pb_pop.bits.count)
-  io.a_pb_beat := RegEnable(putBuffer(io.a_pb_pop.bits.bufIdx)(io.a_pb_pop.bits.count), io.a_pb_pop.fire())
-  when(io.a_pb_pop.fire() && io.a_pb_pop.bits.last) {
+  io.a_pb_beat := RegEnable(putBuffer(io.a_pb_pop.bits.bufIdx)(io.a_pb_pop.bits.count), io.a_pb_pop.fire)
+  when(io.a_pb_pop.fire && io.a_pb_pop.bits.last) {
     beatVals(io.a_pb_pop.bits.bufIdx).foreach(_ := false.B)
   }
 }

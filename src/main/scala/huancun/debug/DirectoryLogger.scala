@@ -4,7 +4,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.{IntParam, StringParam}
 import chisel3.util._
-import huancun.{HCCacheParameters, HCCacheParamsKey}
+import huancun.HCCacheParamsKey
+import utility._
 
 object TypeId {
   val self_dir = 0
@@ -98,7 +99,7 @@ object DirectoryLogger {
       dirLogger.io.way := way
       dirLogger.io.typeId := typeId.U
       dirLogger.io.stamp := stamp
-      dirLogger.io.dir := state.asUInt()
+      dirLogger.io.dir := state.asUInt
       dirLogger.io.tag := tag
       dirLogger.io.wen := wen
       dirLogger.io.clock := clock

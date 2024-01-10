@@ -23,6 +23,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
+import utility.MemReqSource
 
 class SinkB(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   val io = IO(new Bundle() {
@@ -51,7 +52,9 @@ class SinkB(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   io.alloc.bits.alias.foreach(_ := 0.U)
   io.alloc.bits.preferCache := true.B
   io.alloc.bits.dirty := false.B // ignored
+   io.alloc.bits.isHit := true.B // ignored
   io.alloc.bits.fromProbeHelper := false.B
   io.alloc.bits.fromCmoHelper := false.B
   io.alloc.bits.needProbeAckData.foreach(_ := io.b.bits.data(0))
+  io.alloc.bits.reqSource := MemReqSource.NoWhere.id.U // Ignore
 }

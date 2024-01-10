@@ -25,6 +25,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.TLMessages._
 import freechips.rocketchip.tilelink._
 import huancun.utils.HoldUnless
+import utility.MemReqSource
 
 class SourceA(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   val io = IO(new Bundle() {
@@ -44,7 +45,7 @@ class SourceA(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   // io.task.ready := Mux(io.task.bits.putData, !busy, a_acquire.ready)  // TODO: not ready until all beats of Put fire
   io.task.ready := a_acquire.ready && !busy
 
-  when (io.task.fire() && io.task.bits.putData) {
+  when (io.task.fire && io.task.bits.putData) {
     busy := true.B
   }
 
@@ -57,6 +58,7 @@ class SourceA(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   a_acquire.bits.data := DontCare
   a_acquire.bits.corrupt := false.B
   a_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
+  a_acquire.bits.user.lift(utility.ReqSourceKey).foreach(_ := io.task.bits.reqSource)
   a_acquire.bits.echo.lift(DirtyKey).foreach(_ := true.B)
   a_acquire.valid := io.task.valid && !io.task.bits.putData
 
@@ -64,19 +66,19 @@ class SourceA(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   val s1_full = RegInit(false.B)
 
   // S0: read putBuffer
-  val s0_task = RegEnable(io.task.bits, io.task.fire() && io.task.bits.putData)
+  val s0_task = RegEnable(io.task.bits, io.task.fire && io.task.bits.putData)
   val s0_count = RegInit(0.U(beatBits.W))
   // TODO: make beat calculation configurable
   require(blockBytes / beatBytes == 2)
   val s0_last = Mux(s0_task.size === log2Ceil(blockBytes).U, s0_count === (beats-1).U, s0_count === (1-1).U)
-  val s0_valid = io.pb_pop.fire()
+  val s0_valid = io.pb_pop.fire
 
   io.pb_pop.valid := busy && s1_ready
   io.pb_pop.bits.bufIdx := s0_task.bufIdx
   io.pb_pop.bits.count := s0_count
   io.pb_pop.bits.last  := s0_last
 
-  when (io.pb_pop.fire()) {
+  when (io.pb_pop.fire) {
     s0_count := s0_count + 1.U
     when (s0_last) {
       busy := false.B
@@ -105,6 +107,7 @@ class SourceA(edge: TLEdgeOut)(implicit p: Parameters) extends HuanCunModule {
   a_put.bits.data := s1_pb_latch.data
   a_put.bits.corrupt := false.B
   a_put.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
+  a_put.bits.user.lift(utility.ReqSourceKey).foreach(_ := MemReqSource.NoWhere.id.U) //TODO: where does Put comes from
   a_put.bits.echo.lift(DirtyKey).foreach(_ := true.B)
   a_put.valid := s1_full
 
