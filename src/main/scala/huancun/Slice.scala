@@ -82,7 +82,7 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
 
   val outBuf = cacheParams.outerBuf
   io.out.a <> outBuf.a(sourceA.io.a)
-  val bChannel = Wire(io.out.b)
+  val bChannel = Wire(io.out.b.cloneType)
   dontTouch(bChannel)
   bChannel <> io.out.b
   sinkB.io.b <> outBuf.b(bChannel)
