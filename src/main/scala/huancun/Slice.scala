@@ -82,7 +82,10 @@ class Slice()(implicit p: Parameters) extends HuanCunModule {
 
   val outBuf = cacheParams.outerBuf
   io.out.a <> outBuf.a(sourceA.io.a)
-  sinkB.io.b <> outBuf.b(io.out.b)
+  val bChannel = Wire(io.out.b)
+  dontTouch(bChannel)
+  bChannel <> io.out.b
+  sinkB.io.b <> outBuf.b(bChannel)
   val out_c = Wire(io.out.c.cloneType)
   TLArbiter.lowest(edgeOut, out_c, sinkC.io.release, sourceC.io.c)
   io.out.c <> outBuf.c(out_c)
